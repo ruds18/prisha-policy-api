@@ -10,7 +10,7 @@ dotenv.config();
 const app: Express = express();
 const port = process.env.PORT || 3000;
 
-app.use(cors({origin: "http://localhost:5173"}))
+app.use(cors({origin: "http://localhost:5174"}))
 
 app.use('/trpc' , createExpressMiddleware({router : appRouter}));
 
