@@ -6,20 +6,47 @@ import { TRPCError } from '@trpc/server';
 export const appRouter  = t.router({
     getAllEmployees: t.procedure.query(async () => {
       try {
-        const res = await client.query('SELECT * FROM Employee');
+        const res = await client.query('SELECT * FROM employees');
         return res.rows;
       } catch (err) {
         console.error(err);
         throw new Error
       }
     }),
+
     getEmployeeById: t.procedure
-      .input(z.object({ employeeId: z.string() }))
+      .input(z.object({ employeeId: z.number() }))
       .query(async ({ input }) => {
         const { employeeId } = input;
         const res = await client.query('SELECT * FROM Employee WHERE employee_id = $1', [employeeId]);
         return res.rows[0];
       }),
+
+      getDependentsByEmployee: t.procedure
+  .input(z.object({
+    employee_id: z.number(), // Input parameter: employee_id
+  }))
+  .query(async ({ input }) => {
+    const { employee_id } = input;
+
+    try {
+      const query = `
+        SELECT 
+          Dependents.dependent_id, 
+          Dependents.dependent_full_name, 
+          Dependents.date_of_birth, 
+          Dependents.gender, 
+          Dependents.relationship
+        FROM Dependents
+        WHERE Dependents.employee_id = $1
+      `;
+      const res = await client.query(query, [employee_id]);
+      return res.rows;
+    } catch (err) {
+      console.error(err);
+      throw new Error('Failed to retrieve dependents for the selected employee');
+    }
+  }),
   
     // Example to add a new employee
     addEmployee: t.procedure
@@ -65,52 +92,47 @@ export const appRouter  = t.router({
         return { message: "Employee deleted successfully" };
       }),
       
-    login: t.procedure
-     
-    .input(z.object({
-      email: z.string(),    // Changed from username to email
-      password: z.string(), // Not hashed for this example
-    }))
-    .query(async ({ input }) => {
-      const { email, password } = input;
-       console.log(input)
-      try {
-        // Fetch user details from the database using email
-        const userRes = await client.query('SELECT UserAccount.*, Employee.email FROM UserAccount JOIN Employee ON UserAccount.employee_id = Employee.employee_id WHERE Employee.email = $1', [email]);
-        const user = userRes.rows[0];
-        console.log(user);
-  
-        if (!user) {
+      login: t.procedure
+      .input(z.object({
+        email: z.string(),
+        password: z.string(), // This should be hashed in a real application
+      }))
+      .query(async ({ input }) => {
+        const { email, password } = input;
+    
+        try {
+          // Fetch user details from the database using email
+          const userRes = await client.query('SELECT Users.*, Employees.employee_type, InsurancePolicies.policy_name FROM Users JOIN Employees ON Users.user_id = Employees.employee_id LEFT JOIN InsurancePolicies ON Employees.policy_id = InsurancePolicies.policy_id WHERE Users.email = $1', [email]);
+          const user = userRes.rows[0];
+    
+          if (!user) {
+            throw new TRPCError({
+              code: 'NOT_FOUND',
+              message: 'User not found',
+            });
+          }
+    
+          // Check if the password matches (hashed and salted in a real application)
+          if (user.password !== password) {
+            throw new TRPCError({
+              code: 'UNAUTHORIZED',
+              message: 'Invalid credentials',
+            });
+          }
+    
+          return {
+            email: email,
+            role: user.employee_type,
+            policy_name: user.policy_name,
+          };
+        } catch (err) {
+          console.error(err);
+    
           throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: 'User not found',
+            code: 'BAD_REQUEST',
+            message: 'Login failed',
           });
         }
-  
-        // Check if the password matches
-        if (user.password_hash !== password) { // Assuming 'password_hash' stores the plain password for this example
-          throw new TRPCError({
-            code: 'UNAUTHORIZED',
-            message: 'Invalid credentials',
-          });
-        }
-  
-        // Fetch the role of the user
-        const roleRes = await client.query('SELECT role_name FROM Role WHERE role_id = $1', [user.role_id]);
-        const role = roleRes.rows[0].role_name;
-  
-        return {
-          email: email, // Return email instead of username
-          role: role,
-        };
-      } catch (err) {
-        console.error(err);
-  
-        throw new  TRPCError({
-          code: 'BAD_REQUEST',
-          message: '"password" must be at least 4 characters',
-        })
-      }
-    })
+      })
   
   })
