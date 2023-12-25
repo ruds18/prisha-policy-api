@@ -4,7 +4,59 @@ import {client} from '../db'
 import { TRPCError } from '@trpc/server';
 
 export const appRouter  = t.router({
-    getAllEmployees: t.procedure.query(async () => {
+        /**  GET   */
+
+  /** LOGIN **/
+
+   login : t.procedure
+  .input(z.object({
+    email: z.string().email(),
+    password: z.string()
+  }))
+  .query(async ({ input }) => {
+    const { email, password } = input;
+
+    try {
+      const userRes = await client.query(
+        `SELECT u.user_id, u.email, u.password, e.role 
+         FROM users u
+         JOIN employees e ON u.user_id = e.user_id
+         WHERE u.email = $1`,
+        [email]
+      );
+      const user = userRes.rows[0];
+
+      if (!user) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'User not found',
+        });
+      }
+
+      if (user.password !== password) {
+        throw new TRPCError({
+          code: 'UNAUTHORIZED',
+          message: 'Invalid credentials',
+        });
+      }
+
+      return {
+        userId: user.user_id,
+        role: user.role
+      };
+    } catch (err) {
+      console.error(err);
+
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Login failed',
+      });
+    }
+  }),
+
+     /** ALL USERS **/
+
+  getAllEmployees: t.procedure.query(async () => {
       try {
         const res = await client.query('SELECT * FROM employees');
         return res.rows;
@@ -14,125 +66,170 @@ export const appRouter  = t.router({
       }
     }),
 
-    getEmployeeById: t.procedure
-      .input(z.object({ employeeId: z.number() }))
-      .query(async ({ input }) => {
-        const { employeeId } = input;
-        const res = await client.query('SELECT * FROM Employee WHERE employee_id = $1', [employeeId]);
-        return res.rows[0];
-      }),
+ 
+     /** DEPENDENTS OF A SPECIFIC USER **/
 
-      getDependentsByEmployee: t.procedure
+  getAllDependentsOfUser : t.procedure
   .input(z.object({
-    employee_id: z.number(), // Input parameter: employee_id
+    userId: z.number()
   }))
   .query(async ({ input }) => {
-    const { employee_id } = input;
+    const { userId } = input;
+
+    const dependentsRes = await client.query(
+      `SELECT d.*
+       FROM dependents d
+       JOIN employees e ON d.employee_id = e.employee_id
+       WHERE e.user_id = $1`,
+      [userId]
+    );
+
+    return dependentsRes.rows;
+  }),
+
+  /**   SPECIFIC EMPLOYEE    **/
+    getEmployeeById: t.procedure
+      .input(z.object({ userId: z.number() }))
+      .query(async ({ input }) => {
+        const { userId } = input;
+        const employeeRes = await client.query(
+          `SELECT e.*
+           FROM employees e
+           WHERE e.user_id = $1`,
+          [userId]
+        );
+        return employeeRes.rows[0];
+      }),
+
+         /**  POST  */
+
+   /**  ADD DEPENDENTS  **/
+    addDependents : t.procedure
+   .input(z.object({
+     employeeId: z.number(),
+     name: z.string(),
+     dateOfBirth: z.string(),
+     relation: z.string()
+   }))
+   .mutation(async ({ input }) => {
+     const { employeeId, name, dateOfBirth, relation } = input;
+     const res = await client.query(
+       'INSERT INTO dependents (employee_id, name, date_of_birth, relation) VALUES ($1, $2, $3, $4) RETURNING *',
+       [employeeId, name, dateOfBirth, relation]
+     );
+     return res.rows[0];
+   }),
+
+     /** ADD EMPLOYEE **/
+
+    addNewEmployee : t.procedure
+     .input(z.object({
+       newEmployeeDetails: z.object({
+         name: z.string(),
+         role: z.string(),
+         email: z.string().email(),
+         designation: z.string(),
+         dateOfJoining: z.string(),
+         gender: z.string(),
+         mobileNumber: z.string(),
+         insuranceNumber: z.string().optional()
+       })
+     }))
+     .mutation(async ({ input }) => {
+       const { newEmployeeDetails } = input;
+   
+       const userRes = await client.query(
+         'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING user_id', 
+         [newEmployeeDetails.email, 'defaultPassword'] 
+       );
+       const newUser = userRes.rows[0];
+   
+       const employeeRes = await client.query(
+         'INSERT INTO employees (user_id, name, role, designation, date_of_joining, gender, mobile_number, insurance_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+         [newUser.user_id, newEmployeeDetails.name, newEmployeeDetails.role, newEmployeeDetails.designation, newEmployeeDetails.dateOfJoining, newEmployeeDetails.gender, newEmployeeDetails.mobileNumber, newEmployeeDetails.insuranceNumber]
+       );
+       return employeeRes.rows[0];
+     }),
+
+    /** ADD Dependents **/
+
+     addDependent : t.procedure
+  .input(z.object({
+    employeeId: z.number(),
+    name: z.string(),
+    dateOfBirth: z.string(),
+    relation: z.string()
+  }))
+  .mutation(async ({ input }) => {
+    const { employeeId, name, dateOfBirth, relation } = input;
+    const res = await client.query(
+      'INSERT INTO dependents (employee_id, name, date_of_birth, relation) VALUES ($1, $2, $3, $4) RETURNING *',
+      [employeeId, name, dateOfBirth, relation]
+    );
+    return res.rows[0];
+  }),
+
+        /**  PATCH  **/
+  
+    /** EDIT DEPENDENTS **/
+
+    editDependent : t.procedure
+  .input(z.object({
+    dependentId: z.number(),
+    name: z.string().optional(),
+    dateOfBirth: z.string().optional(),
+    relation: z.string().optional()
+  }))
+  .mutation(async ({ input }) => {
+    const { dependentId, name, dateOfBirth, relation } = input;
+    const res = await client.query(
+      'UPDATE dependents SET name = $1, date_of_birth = $2, relation = $3 WHERE dependent_id = $4 RETURNING *',
+      [name, dateOfBirth, relation, dependentId]
+    );
+    return res.rows[0];
+  }),
+
+   /** DELETE **/
+   
+
+   deleteUser : t.procedure
+  .input(z.object({
+    userId: z.number()
+  }))
+  .mutation(async ({ input }) => {
+    const { userId } = input;
+
+    await client.query('BEGIN');
 
     try {
-      const query = `
-        SELECT 
-          Dependents.dependent_id, 
-          Dependents.dependent_full_name, 
-          Dependents.date_of_birth, 
-          Dependents.gender, 
-          Dependents.relationship
-        FROM Dependents
-        WHERE Dependents.employee_id = $1
-      `;
-      const res = await client.query(query, [employee_id]);
-      return res.rows;
-    } catch (err) {
-      console.error(err);
-      throw new Error('Failed to retrieve dependents for the selected employee');
+
+      await client.query(
+        'DELETE FROM dependents WHERE employee_id IN (SELECT employee_id FROM employees WHERE user_id = $1)',
+        [userId]
+      );
+
+      await client.query(
+        'DELETE FROM employees WHERE user_id = $1',
+        [userId]
+      );
+
+      const userRes = await client.query(
+        'SELECT user_id FROM users WHERE user_id = $1',
+        [userId]
+      );
+
+      if (userRes.rows.length > 0) {
+        await client.query(
+          'DELETE FROM users WHERE user_id = $1',
+          [userId]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+
+      await client.query('ROLLBACK');
+      throw error; 
     }
   }),
-  
-    // Example to add a new employee
-    addEmployee: t.procedure
-      .input(z.object({
-        firstName: z.string(),
-        lastName: z.string(),
-        email: z.string(),
-        department: z.string(),
-        position: z.string(),
-        insurancePolicyId: z.string(),
-      }))
-      .mutation(async ({ input }) => {
-        const { firstName, lastName, email, department, position, insurancePolicyId } = input;
-        const res = await client.query(
-          'INSERT INTO Employee (first_name, last_name, email, department, position, insurance_policy_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-          [firstName, lastName, email, department, position, insurancePolicyId]
-        );
-        return res.rows[0];
-      }),
-  
-    // Example to update an employee's details
-    updateEmployee: t.procedure
-      .input(z.object({
-        employeeId: z.string(),
-        email: z.string().optional(),
-        department: z.string().optional(),
-      }))
-      .mutation(async ({ input }) => {
-        const { employeeId, email, department } = input;
-        const res = await client.query(
-          'UPDATE Employee SET email = $2, department = $3 WHERE employee_id = $1 RETURNING *',
-          [employeeId, email, department]
-        );
-        return res.rows[0];
-      }),
-  
-    // Example to delete an employee
-    deleteEmployee: t.procedure
-      .input(z.object({ employeeId: z.string() }))
-      .mutation(async ({ input }) => {
-        const { employeeId } = input;
-        await client.query('DELETE FROM Employee WHERE employee_id = $1', [employeeId]);
-        return { message: "Employee deleted successfully" };
-      }),
-      
-      login: t.procedure
-      .input(z.object({
-        email: z.string(),
-        password: z.string(), // This should be hashed in a real application
-      }))
-      .query(async ({ input }) => {
-        const { email, password } = input;
-    
-        try {
-          // Fetch user details from the database using email
-          const userRes = await client.query('SELECT Users.*, Employees.employee_type, InsurancePolicies.policy_name FROM Users JOIN Employees ON Users.user_id = Employees.employee_id LEFT JOIN InsurancePolicies ON Employees.policy_id = InsurancePolicies.policy_id WHERE Users.email = $1', [email]);
-          const user = userRes.rows[0];
-    
-          if (!user) {
-            throw new TRPCError({
-              code: 'NOT_FOUND',
-              message: 'User not found',
-            });
-          }
-    
-          // Check if the password matches (hashed and salted in a real application)
-          if (user.password !== password) {
-            throw new TRPCError({
-              code: 'UNAUTHORIZED',
-              message: 'Invalid credentials',
-            });
-          }
-    
-          return {
-            email: email,
-            role: user.employee_type,
-            policy_name: user.policy_name,
-          };
-        } catch (err) {
-          console.error(err);
-    
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Login failed',
-          });
-        }
-      })
   
   })
